@@ -42,10 +42,19 @@ jobs:
           $report = Join-Path $env:RUNNER_TEMP 'mineraltoolbox-frozen-report.json'
           $exe = (Resolve-Path 'dist/MineralToolbox/MineralToolbox.exe').Path
           $process = Start-Process -FilePath $exe -ArgumentList @('--self-test', ('"' + $report + '"')) -WorkingDirectory $env:RUNNER_TEMP -PassThru
-          if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'Frozen self-test timed out' }
+          if (-not $process.WaitForExit(300000)) {
+            Get-Process -Id $process.Id | Select-Object Id,ProcessName,Path
+            tasklist /FI "PID eq $($process.Id)"
+            $process.Kill()
+            if (Test-Path $report) { Get-Content $report -Raw }
+            $log = Join-Path $env:TEMP 'mineraltoolbox-startup-error.txt'
+            if (Test-Path $log) { Get-Content $log }
+            throw 'Frozen self-test timed out'
+          }
           if ($process.ExitCode -ne 0) {
             $log = Join-Path $env:TEMP 'mineraltoolbox-startup-error.txt'
             if (Test-Path $log) { Get-Content $log }
+            if (Test-Path $report) { Get-Content $report -Raw }
             throw "Frozen self-test failed: $($process.ExitCode)"
           }
           if (-not (Test-Path $report)) { throw 'Missing frozen self-test report' }

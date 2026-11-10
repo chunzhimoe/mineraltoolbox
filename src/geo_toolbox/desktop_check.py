@@ -1,23 +1,20 @@
 import json
 import tempfile
+import time
+import traceback
 from pathlib import Path
 
 
-def run(report):
+def _write(report, result):
+    report.write_text(json.dumps(result, indent=2), encoding='utf-8')
+
+
+def _workbench_checks():
     import tkinter as tk
-    import numpy as np
-    import pandas as pd
-    import ppigrf
-    import openpyxl
-    import xlrd
-    import rasterio
-    from rasterio.transform import from_origin
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     from matplotlib.figure import Figure
-    from . import GeoToolbox, GeochemSchema, GridSpec
     from .geochem_gui import GeochemWorkbench
     from .gui import MagneticWorkbench
-    from .magnetic_core import MagneticGrid
 
     for workbench in (MagneticWorkbench, GeochemWorkbench):
         root = tk.Tk()
@@ -28,6 +25,19 @@ def run(report):
         canvas.get_tk_widget().destroy()
         root.update()
         app._on_close()
+
+
+def _science_checks(report):
+    import numpy as np
+    import pandas as pd
+    import ppigrf
+    import openpyxl
+    import xlrd
+    import rasterio
+    from rasterio.transform import from_origin
+    from . import GeoToolbox, GeochemSchema, GridSpec
+    from .magnetic_core import MagneticGrid
+
     api = GeoToolbox().geochem
     frame = pd.DataFrame({'id': ['01', '02', '03', '04', '05', '06'],
                           'x': [0., 100., 0., 100., 25., 75.],
@@ -57,7 +67,26 @@ def run(report):
         with rasterio.open(path) as stream:
             assert stream.crs.to_epsg() == 2380
             assert np.isfinite(stream.read(1)).all()
+    report['checks'].append('GeoTIFF/CRS')
+
+
+def run(report):
     report.parent.mkdir(parents=True, exist_ok=True)
-    with report.open('x', encoding='utf-8') as stream:
-        json.dump({'status': 'passed', 'workbenches': ['magnetic', 'geochem'],
-                   'checks': ['TkAgg', 'multRepl', 'CLR', 'GSTools/PyKrige', 'Harmonica FFT', 'Numba equivalent sources', 'GeoTIFF/CRS']}, stream, indent=2)
+    result = {'status': 'started', 'stage': 'startup', 'checks': [], 'started_at': time.time()}
+    _write(report, result)
+    try:
+        result['stage'] = 'Tk/TkAgg workbenches'
+        _write(report, result)
+        _workbench_checks()
+        result['checks'].extend(['Tk magnetic', 'Tk geochem', 'TkAgg'])
+        result['stage'] = 'science algorithms'
+        _write(report, result)
+        _science_checks(result)
+    except BaseException:
+        result['status'] = 'failed'
+        result['error'] = traceback.format_exc()
+        _write(report, result)
+        raise
+    result['checks'][:0] = ['multRepl', 'CLR', 'GSTools/PyKrige', 'Harmonica FFT', 'Numba equivalent sources']
+    result.update(status='passed', stage='finished', elapsed_seconds=time.time() - result['started_at'])
+    _write(report, result)
