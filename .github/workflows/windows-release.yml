@@ -1,0 +1,93 @@
+name: Windows EXE and Release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install desktop dependencies
+        run: |
+          python -m pip install ".[geochem,impute,spatial,excel,magnetic,gui]" "pytest==9.2.0" "pyinstaller==6.22.3" "pyinstaller-hooks-contrib==2026.9"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Synthetic regression tests
+        run: |
+          python -m pytest test -q -W error::pytest.PytestUnraisableExceptionWarning
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build portable application
+        run: |
+          python -m PyInstaller --noconfirm .devin/build/mineraltoolbox.spec
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify frozen application outside source tree
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP 'mineraltoolbox-frozen-report.json'
+          $exe = (Resolve-Path 'dist/MineralToolbox/MineralToolbox.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--self-test', ('"' + $report + '"')) -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'Frozen self-test timed out' }
+          if ($process.ExitCode -ne 0) {
+            $log = Join-Path $env:TEMP 'mineraltoolbox-startup-error.txt'
+            if (Test-Path $log) { Get-Content $log }
+            throw "Frozen self-test failed: $($process.ExitCode)"
+          }
+          if (-not (Test-Path $report)) { throw 'Missing frozen self-test report' }
+          $result = Get-Content $report -Raw | ConvertFrom-Json
+          if ($result.status -ne 'passed') { throw 'Frozen check did not pass' }
+          Copy-Item $report dist/MineralToolbox/self-test.json
+      - name: Archive binary, source, dependency inventory and checksums
+        run: |
+          New-Item -ItemType Directory release | Out-Null
+          python -m pip freeze | Set-Content dist/MineralToolbox/dependencies.txt -Encoding utf8
+          python .devin/build/collect_licenses.py dist/MineralToolbox/THIRD_PARTY_LICENSES
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path dist/MineralToolbox -DestinationPath release/MineralToolbox-windows-x64.zip
+          git archive --format=zip --prefix=MineralToolbox-source/ -o release/MineralToolbox-source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist/MineralToolbox/dependencies.txt release/dependencies.txt
+          Get-ChildItem release -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content release/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MineralToolbox-windows-x64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MineralToolbox-windows-x64
+          path: release
+      - name: Publish tested portable EXE
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* --verify-tag --title "MineralToolbox $RELEASE_TAG — Windows x64" --notes "Windows x64 portable application. Extract the entire ZIP and run MineralToolbox.exe; retain _internal. Includes magnetic and geochemical workbenches. No Python installation required. Unsigned binary: Windows may display SmartScreen warnings. Source and dependency inventory are attached. Independent scientific validation and confirmed CRS remain required for real data."

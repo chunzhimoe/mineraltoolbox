@@ -1,0 +1,34 @@
+ZCOMPOSITIONS PROVENANCE AND ATTRIBUTION NOTICE
+
+The module src/geo_toolbox/python_impute.py is a pure-Python port of the
+multRepl, lrEM (non-robust) and lrEMplus imputation algorithms from the R
+package zCompositions. That module is distributed under the terms of the
+GNU General Public License version 2 or later (GPL-2.0-or-later); the full
+license text is provided in this directory as GPL-2.0-or-later.txt.
+
+Upstream package : zCompositions 1.6.2 (2026-06-20)
+Upstream license : GPL (>= 2) as declared in the package DESCRIPTION
+Authors          : Javier Palarea-Albaladejo [cre, aut]
+                   Josep Antoni Martin-Fernandez [aut]
+Maintainer       : Javier Palarea-Albaladejo <javier.palarea@udg.edu>
+Repository       : https://github.com/Japal/zCompositions
+Upstream commit  : a44822d645ac715dfca230f15bfbe57feabfb95e (2026-06-22)
+Reference        : Palarea-Albaladejo and Martin-Fernandez (2015)
+                   doi:10.1016/j.chemolab.2015.02.019
+
+License text source: SPDX license-list-data verbatim text
+                     (GPL-2.0-or-later, spdx.org).
+
+SPDX-License-Identifier: GPL-2.0-or-later
+
+Python adaptation: nonrobust, nonclosed concentration inputs only;
+explicit rejection of nonconvergence, invalid observations, closed row
+totals, unidentifiable samples and replacement values at or above their
+detection limits. This is a modified implementation, not the upstream R
+package, and numerical equivalence has not yet been established.
+
+Other repository content retains its existing license notices. This notice
+does not waive GPL obligations when this module is combined or distributed
+with other code; review the GPL terms for the intended distribution.
+
+Literature-based revision (2026-11-10): the Python EM backend uses Gaussian conditional regression (Monahan, 2006, doi:10.18637/jss.v016.i08), upper-truncated normal conditional first and second moments (Greene, Econometric Analysis, Chapter 19, Theorem 19.2), and maximum-likelihood EM updates normalized by N (Dempster, Laird and Rubin, 1977, doi:10.1111/j.2517-6161.1977.tb01600.x). It intentionally differs from upstream a44822d6 and is not a numerically equivalent port. The concentration output is an inverse-ALR conditional geometric point estimate, not an arithmetic conditional concentration mean. At most one censored component per sample is supported; ordinary missing components may coexist. Unsupported joint multiple-censoring problems are rejected, without fallback.

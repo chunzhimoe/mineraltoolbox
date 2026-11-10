@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77,<85"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo-toolbox"
+version = "0.1.0"
+description = "Unified geochemical, magnetic and spatial preprocessing toolbox over mature upstream libraries"
+requires-python = ">=3.11"
+license-files = ["LICENSES/*"]
+dependencies = [
+    "numpy>=2.4,<2.5",
+    "pandas>=3.1,<3.2",
+    "pyproj>=3.7,<3.8",
+]
+
+[project.optional-dependencies]
+geochem = ["pyrolite>=0.3.9,<0.4"]
+impute = ["scipy>=1.17,<1.18"]
+spatial = [
+    "PyKrige>=1.7,<1.8",
+    "GSTools>=1.7,<1.8",
+    "rasterio>=1.4,<1.5",
+    "scipy>=1.17,<1.18",
+]
+excel = ["openpyxl>=3.1,<3.2", "xlrd>=2.0,<3"]
+mapgis = ["pyshp==3.1.6"]
+magnetic = ["harmonica==0.7.0", "verde==1.8.1", "ppigrf==2.1.0"]
+gui = ["matplotlib>=3.11,<3.12"]
+parquet = ["pyarrow>=26,<27"]
+test = ["pytest>=9.2,<10"]
+
+[project.gui-scripts]
+geo-toolbox-gui = "geo_toolbox.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
