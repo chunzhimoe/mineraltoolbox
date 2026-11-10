@@ -10,7 +10,10 @@ for distribution in importlib.metadata.distributions():
     name = distribution.metadata.get('Name', 'unknown')
     target = output / re.sub(r'[^A-Za-z0-9_.-]', '_', name)
     target.mkdir(exist_ok=True)
-    (target / 'METADATA.txt').write_text(str(distribution.metadata), encoding='utf-8')
+    metadata = distribution.read_text('METADATA') or distribution.read_text('PKG-INFO')
+    if metadata is None:
+        raise ValueError(f'{name}: neither METADATA nor PKG-INFO is available')
+    (target / 'METADATA.txt').write_text(metadata, encoding='utf-8')
     for entry in distribution.files or []:
         if any('license' in part.lower() or 'copying' in part.lower() or 'notice' in part.lower() for part in entry.parts):
             source = Path(distribution.locate_file(entry))
