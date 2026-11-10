@@ -37,30 +37,22 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm .devin/build/mineraltoolbox.spec
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify frozen application outside source tree
+      - name: Verify both frozen entry points outside source tree
         run: |
-          $report = Join-Path $env:RUNNER_TEMP 'mineraltoolbox-frozen-report.json'
-          $exe = (Resolve-Path 'dist/MineralToolbox/MineralToolbox.exe').Path
-          $process = Start-Process -FilePath $exe -ArgumentList @('--self-test', ('"' + $report + '"')) -WorkingDirectory $env:RUNNER_TEMP -PassThru
-          if (-not $process.WaitForExit(300000)) {
-            Get-Process -Id $process.Id | Select-Object Id,ProcessName,Path
-            tasklist /FI "PID eq $($process.Id)"
-            $process.Kill()
-            if (Test-Path $report) { Get-Content $report -Raw }
-            $log = Join-Path $env:TEMP 'mineraltoolbox-startup-error.txt'
-            if (Test-Path $log) { Get-Content $log }
-            throw 'Frozen self-test timed out'
-          }
-          if ($process.ExitCode -ne 0) {
-            $log = Join-Path $env:TEMP 'mineraltoolbox-startup-error.txt'
-            if (Test-Path $log) { Get-Content $log }
-            if (Test-Path $report) { Get-Content $report -Raw }
-            throw "Frozen self-test failed: $($process.ExitCode)"
-          }
-          if (-not (Test-Path $report)) { throw 'Missing frozen self-test report' }
-          $result = Get-Content $report -Raw | ConvertFrom-Json
-          if ($result.status -ne 'passed') { throw 'Frozen check did not pass' }
-          Copy-Item $report dist/MineralToolbox/self-test.json
+          python test/verify_frozen_bundle.py --output test/out/frozen-ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item test/out/frozen-ci/MineralToolbox-report.json dist/MineralToolbox/self-test.json
+      - name: Retain frozen diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-startup-diagnostics
+          path: |
+            test/out/frozen-ci/**
+            ${{ runner.temp }}/mineraltoolbox-startup-error.txt
+            build/mineraltoolbox/warn-mineraltoolbox.txt
+          if-no-files-found: warn
+          retention-days: 14
       - name: Archive binary, source, dependency inventory and checksums
         run: |
           New-Item -ItemType Directory release | Out-Null

@@ -5,9 +5,9 @@ root = Path(SPECPATH).resolve().parents[1]
 datas = [(str(root / 'LICENSES'), 'LICENSES')]
 binaries = []
 hiddenimports = ['matplotlib.backends.backend_tkagg', 'rasterio.sample', 'rasterio.vrt']
-for package in ('geo_toolbox', 'pyrolite', 'gstools', 'pykrige', 'ppigrf', 'xrft', 'openpyxl', 'xlrd'):
+for package in ('geo_toolbox', 'pyrolite', 'gstools', 'pykrige', 'ppigrf', 'xrft', 'openpyxl', 'xlrd', 'rasterio'):
     hiddenimports += collect_submodules(package, filter=lambda name: '.tests' not in name and '.test' not in name)
-for package in ('pyrolite', 'ppigrf'):
+for package in ('pyrolite', 'ppigrf', 'rasterio'):
     datas += collect_data_files(package)
 for package in ('numba', 'llvmlite', 'choclo', 'harmonica', 'verde'):
     data, binary, modules = collect_all(package, filter_submodules=lambda name: '.tests' not in name and '.test' not in name)
@@ -25,4 +25,6 @@ a = Analysis([str(root / '.devin/build/launcher.py')], pathex=[str(root / 'src')
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='MineralToolbox',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='MineralToolbox')
+diagnostic = EXE(pyz, a.scripts, [], exclude_binaries=True, name='MineralToolbox-check',
+                 debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=True)
+coll = COLLECT(exe, diagnostic, a.binaries, a.datas, strip=False, upx=False, name='MineralToolbox')
