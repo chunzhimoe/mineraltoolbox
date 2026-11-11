@@ -48,8 +48,9 @@ class GeochemWorkbench(MagneticWorkbench):
         self.path_var = tk.StringVar()
         self.sheet_var = tk.StringVar()
         self.header_var = tk.StringVar(value="1")
+        self.header_rows_var = tk.StringVar(value="1")
         self.path_var.trace_add("write", self._path_changed)
-        for var in (self.sheet_var, self.header_var):
+        for var in (self.sheet_var, self.header_var, self.header_rows_var):
             var.trace_add("write", self._source_changed)
         ttk.Label(src, text="路径").grid(row=0, column=0, sticky="e")
         self._input(ttk.Entry(src, textvariable=self.path_var)).grid(
@@ -63,10 +64,16 @@ class GeochemWorkbench(MagneticWorkbench):
         self.sheet_combo.grid(row=1, column=1, sticky="w")
         ttk.Label(src, text="表头行(从1计)").grid(row=1, column=2, sticky="e")
         self._input(ttk.Entry(src, textvariable=self.header_var, width=6)).grid(row=1, column=3)
+        ttk.Label(src, text="表头占几行").grid(row=1, column=4, sticky="e")
+        self._input(ttk.Combobox(src, textvariable=self.header_rows_var,
+                                 values=("1", "2"), width=4,
+                                 state="readonly")).grid(row=1, column=5)
         src.columnconfigure(1, weight=1)
 
         ttk.Label(frame, text="先看列名是否读对。第一行若是标题，请调整列名行再读取。",
                   wraplength=740).pack(anchor="w", padx=8, pady=6)
+        ttk.Label(frame, text="双行表头选2，逐列采用下行非空列名，否则采用上行；不自动识别单位。",
+                  wraplength=740).pack(anchor="w", padx=8)
         confirm_outer, confirm = self._scroll_frame(self.tab_confirm, 760)
         confirm_outer.pack(fill="both", expand=True)
         ttk.Label(confirm, text="确认点号和坐标，再勾选要看的元素并填写各自单位。不会自动填补或删除原值。",

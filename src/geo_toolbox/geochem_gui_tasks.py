@@ -24,7 +24,7 @@ def import_source(preview, *, mapping):
         sample_id = "__gui_audit_id"
         if sample_id in frame:
             raise DataValidationError("保留列__gui_audit_id已存在")
-        frame[sample_id] = [f"row{preview.get('header', 0) + 2 + i}" for i in range(len(frame))]
+        frame[sample_id] = [f"row{preview.get('data_start_row', preview.get('header', 0) + 2) + i}" for i in range(len(frame))]
     elements = mapping.get("elements")
     if not isinstance(elements, (list, tuple)) or not elements:
         raise DataValidationError("至少选择一个元素列，顺序将用于填补与对数比变换")
@@ -58,6 +58,8 @@ def import_source(preview, *, mapping):
     data.history.append(record("geochem_gui_import", "geo_toolbox", {
         "source": preview["source"], "source_sha256": preview.get("source_sha256"),
         "sheet_name": preview.get("sheet_name"), "header": preview.get("header"),
+        "header_rows": preview.get("header_rows", 1), "original_headers": preview.get("original_headers"),
+        "data_start_row": preview.get("data_start_row", preview.get("header", 0) + 2),
         "mapping": dict(mapping), "element_order": list(schema.elements),
         "generated_ids": generated, "original_identifiers_preserved": True,
     }))

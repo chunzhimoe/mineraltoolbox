@@ -16,17 +16,21 @@ from .magnetic import MagneticAPI, _metric, _usable
 from .magnetic_core import MagneticDataset, MagneticGrid, MagneticSchema
 
 
-def preview_source(source, *, sheet_name=0, header=0):
+def preview_source(source, *, sheet_name=0, header=0, header_rows=1):
     path = Path(source).expanduser().resolve()
     if not path.is_file():
         raise DataValidationError("输入文件不存在或不是普通文件")
     if type(header) is not int or header < 0:
         raise DataValidationError("表头行必须是正整数（界面从1开始计数）")
+    if type(header_rows) is not int or header_rows not in (1, 2):
+        raise DataValidationError("表头行数只能明确选择1或2")
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     suffix = path.suffix.lower()
+    options = {'dtype': str, 'keep_default_na': False, 'header': header if header_rows == 1 else None}
+    original_headers = None
     if suffix == ".csv":
         sheets = []
-        frame = pd.read_csv(path, dtype=str, keep_default_na=False, header=header)
+        frame = pd.read_csv(path, **options)
     elif suffix in {".xls", ".xlsx", ".xlsm"}:
         engine = "xlrd" if suffix == ".xls" else "openpyxl"
         require(engine)
@@ -34,16 +38,29 @@ def preview_source(source, *, sheet_name=0, header=0):
             sheets = book.sheet_names
             if sheet_name is None or isinstance(sheet_name, (list, tuple, dict)):
                 raise DataValidationError("请选择单个工作表")
-            frame = pd.read_excel(book, sheet_name=sheet_name, header=header, dtype=str, keep_default_na=False)
+            frame = pd.read_excel(book, sheet_name=sheet_name, **options)
     else:
         raise DataValidationError("仅支持 CSV / XLS / XLSX / XLSM")
+    if header_rows == 2:
+        if len(frame) <= header + header_rows:
+            raise DataValidationError("指定的两行表头之后没有数据，请检查表头起始行")
+        original_headers = frame.iloc[header:header + header_rows].values.tolist()
+        columns = []
+        for position, values in enumerate(zip(*original_headers)):
+            names = [str(value) for value in values if str(value).strip()]
+            columns.append(names[-1] if names else f"未命名列{position + 1}")
+        if len(set(columns)) != len(columns):
+            raise DataValidationError("双行表头合并后列名重复，请检查原始表头；不会自动重命名")
+        frame = frame.iloc[header + header_rows:].copy(deep=True).reset_index(drop=True)
+        frame.columns = columns
     if frame.empty or not frame.columns.is_unique:
         raise DataValidationError("表格为空或列名重复")
     if hashlib.sha256(path.read_bytes()).hexdigest() != source_hash:
         raise DataValidationError("读取过程中源文件发生变化，请重新预览")
     return {"source": str(path), "source_sha256": source_hash, "sheets": sheets, "columns": frame.columns.tolist(),
             "frame": frame.copy(deep=True), "preview": frame.head(100).copy(deep=True),
-            "header": header, "sheet_name": sheet_name}
+            "header": header, "sheet_name": sheet_name, "header_rows": header_rows,
+            "original_headers": original_headers, "data_start_row": header + header_rows + 1}
 
 
 def _prepare_import_ids(preview, mapping):
@@ -60,7 +77,7 @@ def _prepare_import_ids(preview, mapping):
     blank = ids.isna() | ids.astype(str).str.strip().eq("")
     duplicate = ~blank & ids.duplicated(keep="first")
     excluded = blank | duplicate
-    first_row = preview.get("header", 0) + 2
+    first_row = preview.get("data_start_row", preview.get("header", 0) + 2)
     skipped = []
     for position in np.flatnonzero(excluded.to_numpy()):
         values = frame.iloc[position].astype(object)
@@ -106,7 +123,7 @@ def import_source(preview, *, mapping):
         sample_id = "__gui_audit_id"
         if sample_id in frame:
             raise DataValidationError("保留列__gui_audit_id已存在，请更换源表列名")
-        frame[sample_id] = [f"row{preview.get('header', 0) + 2 + i}" for i in range(len(frame))]
+        frame[sample_id] = [f"row{preview.get('data_start_row', preview.get('header', 0) + 2) + i}" for i in range(len(frame))]
         derived["generated_id"] = "Excel/CSV row number; original identifiers retained, not silently repaired"
     line, sequence = mapping.get("line") or None, mapping.get("sequence") or None
     if split:
@@ -133,6 +150,8 @@ def import_source(preview, *, mapping):
     data.history.append(record("gui_import", "geo_toolbox", {"source": preview["source"],
                         "source_sha256": preview.get("source_sha256"),
                         "sheet_name": preview.get("sheet_name"), "header": preview.get("header"),
+                        "header_rows": preview.get("header_rows", 1), "original_headers": preview.get("original_headers"),
+                        "data_start_row": preview.get("data_start_row", preview.get("header", 0) + 2),
                         "mapping": dict(mapping), "derived_columns": derived}))
     return data
 

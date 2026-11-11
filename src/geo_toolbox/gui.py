@@ -915,9 +915,14 @@ class MagneticWorkbench:
             header = int(self.header_var.get()) - 1
         except ValueError:
             header = -1
+        kwargs = {"sheet_name": sheet, "header": header}
+        if hasattr(self, "header_rows_var"):
+            try:
+                kwargs["header_rows"] = int(self.header_rows_var.get())
+            except ValueError:
+                kwargs["header_rows"] = 0
         if self._submit("预览…",
-                        lambda: self._task_api().preview_source(
-                            path, sheet_name=sheet, header=header),
+                        lambda: self._task_api().preview_source(path, **kwargs),
                         self._preview_done):
             self._log(f"预览请求: {path}")
 
@@ -957,6 +962,10 @@ class MagneticWorkbench:
         self._update_step_label()
         self._log(f"预览完成: {preview['source']} 列={len(columns)} "
                   f"全量行数={len(preview['frame'])}")
+        if preview.get("header_rows") == 2:
+            self._log(f"双行表头已合并；原表头保留，"
+                      f"数据从第{preview.get('data_start_row')}行开始；"
+                      "请按原单位说明手动选单位")
 
     def _apply_mapping_columns(self, columns):
         self._populating = True
