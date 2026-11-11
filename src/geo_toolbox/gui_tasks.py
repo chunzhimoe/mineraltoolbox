@@ -156,7 +156,50 @@ def _integer(value, name):
     return int(number)
 
 
-def _parameters(operation, parameters):
+def sample_bounds(data, resolution=None):
+    if data is None:
+        raise DataValidationError("请先导入测点")
+    axes = ['easting', 'northing'] if isinstance(data, MagneticDataset) else ['x', 'y']
+    coordinates = data.coordinates[axes]
+    if isinstance(data, MagneticDataset):
+        coordinates = coordinates.loc[data.active]
+    xy = coordinates.to_numpy(dtype=float)
+    xy = xy[np.isfinite(xy).all(axis=1)]
+    if not len(xy):
+        raise DataValidationError("没有可用于获取网格范围的有效坐标")
+    lower, upper = xy.min(axis=0), xy.max(axis=0)
+    if resolution is not None:
+        spacing = _real(resolution, "网格间距m", positive=True)
+        lower = np.floor(lower / spacing) * spacing
+        upper = np.ceil(upper / spacing) * spacing
+        upper = np.maximum(upper, lower + spacing)
+    return [float(lower[0]), float(lower[1]), float(upper[0]), float(upper[1])]
+
+
+def _prepare_interpolation(data):
+    coordinates = data.coordinates.loc[data.active, ['easting', 'northing']]
+    duplicate = coordinates.duplicated(keep='first') & np.isfinite(coordinates.to_numpy(dtype=float)).all(axis=1)
+    if not duplicate.any():
+        return data
+    active = data.active.copy()
+    excluded = coordinates.index[duplicate]
+    active.loc[excluded] = False
+    first_ids = coordinates.index[~duplicate]
+    first_lookup = {tuple(row): sample_id for sample_id, row in coordinates.loc[first_ids].iterrows()}
+    skipped = []
+    for sample_id in excluded:
+        xy = coordinates.loc[sample_id]
+        skipped.append({'sample_id': sample_id, 'retained_sample_id': first_lookup[tuple(xy)],
+                        'x': float(xy.iloc[0]), 'y': float(xy.iloc[1]),
+                        'value_nT': float(data.values.loc[sample_id]),
+                        'upward': float(data.coordinates.loc[sample_id, 'upward'])})
+    audit = {'policy': 'keep_first_active_xy', 'input_active_rows': int(data.active.sum()),
+             'retained_active_rows': int(active.sum()), 'skipped_rows': len(skipped),
+             'skipped': skipped, 'raw_data_changed': False, 'values_averaged': False}
+    return data.copy(active=active, history=[*data.history, record('interpolation_xy_filter', 'geo_toolbox', audit)])
+
+
+def _parameters(operation, parameters, data=None):
     p = dict(parameters)
     if operation == "check":
         return {}
@@ -172,9 +215,13 @@ def _parameters(operation, parameters):
         return {"rows": tuple(_integer(v, "行索引") for v in rows),
                 "columns": tuple(_integer(v, "列索引") for v in columns)}
     if operation == "interpolate":
-        bounds = p.get("bounds") or [p.get(name) for name in ("xmin", "ymin", "xmax", "ymax")]
+        resolution = _real(p.get("resolution"), "网格间距m", positive=True)
+        auto_bounds = p.get("auto_bounds", False)
+        if type(auto_bounds) is not bool:
+            raise DataValidationError("自动网格范围必须明确选择")
+        bounds = sample_bounds(data, resolution) if auto_bounds else p.get("bounds") or [p.get(name) for name in ("xmin", "ymin", "xmax", "ymax")]
         result = {"bounds": [_real(v, "网格边界") for v in bounds],
-                  "resolution": _real(p.get("resolution"), "网格间距m", positive=True),
+                  "resolution": resolution,
                   "method": p.get("method"), "upward": _real(p.get("upward"), "目标平面高程m"),
                   "max_distance": _real(p.get("max_distance"), "支持半径m", positive=True)}
         for name in ("depth", "damping", "block_size"):
@@ -197,7 +244,7 @@ def preflight(data, *, operation, parameters):
     try:
         if data is None:
             raise DataValidationError("请先导入样点或生成网格")
-        p = _parameters(operation, parameters)
+        p = _parameters(operation, parameters, data)
         if operation in {"check", "spikes", "interpolate"} and not isinstance(data, MagneticDataset):
             raise DataValidationError("该任务需要样点数据")
         if operation in {"crop", "transform"} and not isinstance(data, MagneticGrid):
@@ -206,8 +253,6 @@ def preflight(data, *, operation, parameters):
             qc = MagneticAPI().check(data).diagnostics
             if qc["invalid_coordinate_ids"]:
                 warnings.append("存在缺失/非法坐标；质控保留原行，空间处理将拒绝")
-            if qc["duplicate_coordinate_ids"]:
-                warnings.append("存在重复坐标；不自动平均或删除")
             if data.schema.crs is None:
                 warnings.append("CRS未知：仅允许非空间质控，不生成定位成果")
         elif operation == "spikes":
@@ -229,7 +274,8 @@ def preflight(data, *, operation, parameters):
             coordinate_report = check_coordinates(data.coordinates[['easting', 'northing']].to_numpy(), crs=data.schema.crs)
             if coordinate_report['status'] == 'review':
                 warnings.append('测点坐标声明与范围需要复核：' + '；'.join(coordinate_report['messages']))
-            coordinates, _ = _usable(data)
+            prepared = _prepare_interpolation(data)
+            coordinates, _ = _usable(prepared)
             grid = GridSpec.from_bounds(p["bounds"], p["resolution"], data.schema.crs)
             if grid.width * grid.height > 1_000_000:
                 raise DataValidationError("本地GUI单次最多100万个网格像元，请减小范围或增大间距")
@@ -314,7 +360,7 @@ def execute(data, *, operation, parameters):
     result = preflight(data, operation=operation, parameters=parameters)
     if not result["ok"]:
         raise DataValidationError("\n".join(result["errors"]))
-    p = _parameters(operation, parameters)
+    p = _parameters(operation, parameters, data)
     api = MagneticAPI()
     if operation == "check":
         checked = api.check(data)
@@ -324,7 +370,7 @@ def execute(data, *, operation, parameters):
         return {"data": checked.data, "report": checked.diagnostics}
     if operation == "interpolate":
         grid = GridSpec.from_bounds(p.pop("bounds"), p.pop("resolution"), data.schema.crs)
-        output = api.interpolate(data, grid=grid, **p)
+        output = api.interpolate(_prepare_interpolation(data), grid=grid, **p)
     elif operation == "transform":
         output = api.transform(data, **p)
     else:

@@ -286,6 +286,7 @@ class GeochemWorkbench(MagneticWorkbench):
             left, text="克里金插值（当前浓度，支持栅格必需）")
         interp.pack(fill="x", pady=4)
         self.interp_vars = {}
+        self.interp_entries = {}
         for i, (name, label) in enumerate((("xmin", "x最小"), ("ymin", "y最小"),
                                           ("xmax", "x最大"), ("ymax", "y最大"),
                                           ("resolution", "间距m*"),
@@ -293,9 +294,10 @@ class GeochemWorkbench(MagneticWorkbench):
             row, col = divmod(i, 2)
             ttk.Label(interp, text=label).grid(row=row, column=col * 2, sticky="e")
             var = tk.StringVar()
-            self._input(ttk.Entry(interp, textvariable=var, width=9)).grid(
-                row=row, column=col * 2 + 1, padx=2, pady=1, sticky="w")
+            entry = self._input(ttk.Entry(interp, textvariable=var, width=9))
+            entry.grid(row=row, column=col * 2 + 1, padx=2, pady=1, sticky="w")
             self.interp_vars[name] = var
+            self.interp_entries[name] = entry
         ttk.Label(interp, text="支持GeoTIFF*").grid(row=3, column=0, sticky="e")
         self.support_var = tk.StringVar()
         self._input(ttk.Entry(interp, textvariable=self.support_var, width=24)).grid(
@@ -323,6 +325,15 @@ class GeochemWorkbench(MagneticWorkbench):
         self.interp_btn = self._input(ttk.Button(interp, text="执行插值",
                                                command=self._do_interpolate))
         self.interp_btn.grid(row=6, column=2, columnspan=2, padx=4)
+        self.auto_bounds_var = tk.BooleanVar(value=True)
+        self._input(ttk.Checkbutton(
+            interp, text="范围自动取自测点，并按间距向外对齐",
+            variable=self.auto_bounds_var,
+            command=self._auto_bounds_changed)).grid(
+            row=7, column=0, columnspan=4, sticky="w", pady=2)
+        self.interp_vars["resolution"].trace_add(
+            "write", self._refresh_auto_bounds)
+        self._auto_bounds_changed()
 
         validate = self._validate_frame = ttk.LabelFrame(left, text="空间留出验证")
         validate.pack(fill="x", pady=4)
@@ -648,6 +659,7 @@ class GeochemWorkbench(MagneticWorkbench):
         data = self.dataset
         if data is None:
             self.dataset_label.configure(text="尚未导入数据")
+            self._refresh_auto_bounds()
             return
         counts = {name: int((data.status == name).to_numpy().sum())
                   for name in ("observed", "missing", "censored", "invalid")}
@@ -656,6 +668,7 @@ class GeochemWorkbench(MagneticWorkbench):
                  f"缺失 {counts['missing']}、低于限值 {counts['censored']}、待复核 {counts['invalid']}；"
                  f"坐标系{'已声明（见坐标检查）' if data.crs else '未知，先做非空间检查'}" + self._import_audit_summary(),
             wraplength=790)
+        self._refresh_auto_bounds()
 
     def _restore_original(self):
         if self.original_dataset is None:
@@ -755,6 +768,14 @@ class GeochemWorkbench(MagneticWorkbench):
         self._update_step_label()
         if kind == 'concentration':
             self.notebook.select(self.tab_qc)
+        filters = [entry["parameters"] for entry in
+                   (result.get("report") or {}).get("history", [])
+                   if entry.get("operation") == "spatial_coordinate_filter"]
+        if filters:
+            audit = filters[-1]
+            self._log(f"空间输入过滤：无效XY {audit['invalid_rows']} 行、"
+                      f"重复XY {audit['duplicate_rows']} 行，"
+                      f"保留 {audit['retained_rows']} 行；原始数据未改")
         self._log(f"任务完成 kind={kind}")
 
     def _show_features(self, data):
@@ -884,6 +905,7 @@ class GeochemWorkbench(MagneticWorkbench):
                       "xmax": self.interp_vars["xmax"].get(),
                       "ymax": self.interp_vars["ymax"].get(),
                       "resolution": self.interp_vars["resolution"].get(),
+                      "auto_bounds": bool(self.auto_bounds_var.get()),
                       "support_path": self.support_var.get(),
                       "variogram": raw_model(self.kriging_variogram.get()),
                       "nlags": self.nlags_var.get(),

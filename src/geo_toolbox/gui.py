@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import queue
 import sys
 import tempfile
@@ -493,6 +494,15 @@ class MagneticWorkbench:
         ttk.Label(interp, foreground="#8a5a00", wraplength=380, justify="left",
                   text="请确认X为东坐标、Y为北坐标、坐标/高程单位为米且高程基准已核实；"
                        "不要直接套用主图CRS").grid(row=6, column=0, columnspan=4, sticky="w")
+        self.auto_bounds_var = tk.BooleanVar(value=True)
+        self._input(ttk.Checkbutton(
+            interp, text="范围自动取自测点，并按间距向外对齐",
+            variable=self.auto_bounds_var,
+            command=self._auto_bounds_changed)).grid(
+            row=7, column=0, columnspan=4, sticky="w", pady=2)
+        self.interp_vars["resolution"].trace_add(
+            "write", self._refresh_auto_bounds)
+        self._auto_bounds_changed()
 
         trans = self._trans_frame = ttk.LabelFrame(left, text="场变换（当前网格）")
         trans.pack(fill="x", pady=4)
@@ -737,6 +747,7 @@ class MagneticWorkbench:
         self.coordinate_report = None
         if hasattr(self, 'coordinate_label'):
             self.coordinate_label.configure(text="配置已更改，请重新检查坐标；不自动套用之前的坐标系。")
+        self._refresh_auto_bounds()
         if self.notebook.select() not in (str(self.tab_import), str(self.tab_confirm)):
             self.notebook.select(self.tab_import if self.preview is None else self.tab_confirm)
         self._refresh_actions()
@@ -1019,12 +1030,14 @@ class MagneticWorkbench:
         data = self.dataset
         if data is None:
             self.dataset_label.configure(text="尚未导入数据")
+            self._refresh_auto_bounds()
             return
         from .gui_guidance import labeled
         self.dataset_label.configure(
             text=f"已保留 {len(data.values)} 行；{labeled(data.stage)}；"
                  f"原单位 {data.schema.unit}（当前统一为 nT）；坐标系{'已声明（见坐标检查）' if data.schema.crs else '未知，先做非空间检查'}" + self._import_audit_summary(),
             wraplength=790)
+        self._refresh_auto_bounds()
 
     def _do_check(self):
         if self.dataset is not None:
@@ -1137,10 +1150,48 @@ class MagneticWorkbench:
         canvas.get_tk_widget().pack(fill="both", expand=True)
         self._grid_canvas = canvas
 
+    def _auto_bounds_changed(self):
+        state = "readonly" if self.auto_bounds_var.get() else "normal"
+        for name in ("xmin", "ymin", "xmax", "ymax"):
+            self.interp_entries[name].configure(state=state)
+        self._refresh_auto_bounds()
+
+    def _refresh_auto_bounds(self, *args):
+        if self._busy or not hasattr(self, "auto_bounds_var"):
+            return
+        if not self.auto_bounds_var.get():
+            return
+        data = self.dataset
+        if data is None:
+            for name in ("xmin", "ymin", "xmax", "ymax"):
+                self.interp_vars[name].set("")
+            return
+        from .errors import DataValidationError
+        from .gui_tasks import sample_bounds
+        resolution = self.interp_vars["resolution"].get().strip()
+        converted = None
+        if resolution:
+            try:
+                value = float(resolution)
+                if math.isfinite(value) and value > 0:
+                    converted = value
+            except ValueError:
+                converted = None
+        try:
+            bounds = (sample_bounds(data, resolution=converted)
+                      if converted is not None else sample_bounds(data))
+        except DataValidationError:
+            for name in ("xmin", "ymin", "xmax", "ymax"):
+                self.interp_vars[name].set("")
+            return
+        for name, value in zip(("xmin", "ymin", "xmax", "ymax"), bounds):
+            self.interp_vars[name].set(f"{value:.12g}")
+
     def _do_interpolate(self):
         if self.dataset is None:
             return
         parameters = {name: var.get() for name, var in self.interp_vars.items()}
+        parameters["auto_bounds"] = bool(self.auto_bounds_var.get())
         from .gui_guidance import raw_method
         parameters["method"] = raw_method(self.interp_method.get())
         if parameters["method"] != "equivalent_sources":
@@ -1185,6 +1236,11 @@ class MagneticWorkbench:
         self.report_text.insert("end", json.dumps(result["report"], ensure_ascii=False,
                                                   indent=2, default=str))
         self._refresh_actions()
+        filters = [entry["parameters"] for entry in getattr(grid, "history", [])
+                   if entry["operation"] == "interpolation_xy_filter"]
+        if filters:
+            self._log(f"插值输入去重：剔除重复XY测点 {filters[-1]['skipped_rows']} 行，"
+                      "保留首个测点，原始数据未改")
         self._log("网格运算完成")
 
     def _report_with_coordinates(self, report):

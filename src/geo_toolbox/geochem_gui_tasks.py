@@ -11,7 +11,7 @@ from pyproj.exceptions import CRSError
 from .core import GeochemDataset, GeochemSchema, GridSpec, MapResult, record, write_json
 from .errors import DataValidationError, MissingBackendError
 from .geochem import GeochemistryAPI, _metric_crs, _require_concentrations, _usable
-from .gui_tasks import _export_import_audit, _integer, _prepare_import_ids, _real, describe_error, preview_source
+from .gui_tasks import _export_import_audit, _integer, _prepare_import_ids, _real, describe_error, preview_source, sample_bounds
 
 
 def import_source(preview, *, mapping):
@@ -70,7 +70,7 @@ def _choice(value, choices, label):
     return value
 
 
-def _parameters(operation, parameters):
+def _parameters(operation, parameters, data=None):
     p = dict(parameters)
     if operation == "check":
         return {}
@@ -120,8 +120,11 @@ def _parameters(operation, parameters):
                     raise DataValidationError("训练/测试ID必须逐行填写，每行一个完整点号")
                 result[name] = list(raw)
             return result
-        result["bounds"] = [_real(p.get(name), "网格边界m") for name in ("xmin", "ymin", "xmax", "ymax")]
         result["resolution"] = _real(p.get("resolution"), "网格间距m", positive=True)
+        auto_bounds = p.get("auto_bounds", False)
+        if type(auto_bounds) is not bool:
+            raise DataValidationError("自动网格范围必须明确选择")
+        result["bounds"] = sample_bounds(data, result["resolution"]) if auto_bounds else [_real(p.get(name), "网格边界m") for name in ("xmin", "ymin", "xmax", "ymax")]
         support = str(p.get("support_path") or "").strip()
         if not support:
             raise DataValidationError("必须显式提供与目标网格完全对齐的采样支持GeoTIFF，不能默认全域预测")
@@ -139,6 +142,36 @@ def _parameters(operation, parameters):
     raise DataValidationError("不支持的地化界面任务")
 
 
+def _prepare_spatial(data):
+    coordinates = data.coordinates.to_numpy(dtype=float)
+    invalid = ~np.isfinite(coordinates).all(axis=1)
+    duplicate = ~invalid & data.coordinates.duplicated(keep='first').to_numpy()
+    excluded = invalid | duplicate
+    if (~excluded).sum() < 3:
+        raise DataValidationError(f"跳过无效坐标 {int(invalid.sum())} 行、后续重复坐标 {int(duplicate.sum())} 行后，"
+                                  f"仅剩 {int((~excluded).sum())} 个有效测点；空间分析至少需要3个不同位置的测点。请检查X/Y列和表头行。")
+    if not excluded.any():
+        return data
+    changes = {name: getattr(data, name).iloc[~excluded].copy(deep=True)
+               for name in ('raw', 'values', 'coordinates', 'status', 'detection_limits', 'imputed')}
+    first = {tuple(xy): sample_id for sample_id, xy in data.coordinates.iloc[~excluded].iterrows()}
+    skipped = []
+    for position in np.flatnonzero(excluded):
+        raw = data.raw.iloc[position].astype(object)
+        raw = raw.where(pd.notna(raw), None)
+        item = {'sample_id': data.values.index[position],
+                'reason': 'invalid_xy' if invalid[position] else 'duplicate_xy',
+                'values': raw.to_dict()}
+        if duplicate[position]:
+            item['retained_sample_id'] = first[tuple(coordinates[position])]
+        skipped.append(item)
+    audit = {'policy': 'finite_xy_keep_first', 'input_rows': len(data.values),
+             'retained_rows': int((~excluded).sum()), 'invalid_rows': int(invalid.sum()),
+             'duplicate_rows': int(duplicate.sum()), 'skipped': skipped,
+             'raw_data_changed': False, 'values_averaged': False}
+    return data.copy(**changes, history=[*data.history, record('spatial_coordinate_filter', 'geo_toolbox', audit)])
+
+
 def _spatial(data):
     _metric_crs(data)
     for element in data.schema.elements:
@@ -153,14 +186,14 @@ def preflight(data, *, operation, parameters):
         if not isinstance(data, GeochemDataset):
             raise DataValidationError("该任务需要地化样点数据，请先导入")
         _require_concentrations(data)
-        p = _parameters(operation, parameters)
+        if operation in {'variogram', 'interpolate'}:
+            data = _prepare_spatial(data)
+        p = _parameters(operation, parameters, data)
         api = GeochemistryAPI()
         if operation == "check":
             qc = api.check(data).diagnostics
             if data.crs is None:
                 warnings.append("CRS未知：可以非空间质控，不能变异函数/插值/空间留出验证")
-            if qc["invalid_coordinate_ids"] or qc["duplicate_coordinate_ids"]:
-                warnings.append("存在非法/缺失或重复坐标；保留原行，空间处理将拒绝")
             if qc["unresolved_cells"]:
                 warnings.append("存在未解决的删失、缺失或非法值；不自动填补/删除/替换")
         elif operation == "impute":
@@ -230,7 +263,9 @@ def execute(data, *, operation, parameters):
     checked = preflight(data, operation=operation, parameters=parameters)
     if not checked["ok"]:
         raise DataValidationError("\n".join(checked["errors"]))
-    p = _parameters(operation, parameters)
+    if operation in {'variogram', 'interpolate'}:
+        data = _prepare_spatial(data)
+    p = _parameters(operation, parameters, data)
     api = GeochemistryAPI()
     if operation in {"check", "impute", "transform"}:
         result = getattr(api, operation)(data, **p)
@@ -268,4 +303,14 @@ def export_result(data, *, directory, report):
         data.export(target)
     write_json(target / "gui_report.json", report)
     _export_import_audit(data, target, report)
+    history = data.get('history', []) if isinstance(data, dict) else data.history
+    audits = [entry['parameters'] for entry in history if entry['operation'] == 'spatial_coordinate_filter']
+    if audits:
+        audit = audits[-1]
+        write_json(target / 'spatial_coordinate_audit.json', audit)
+        rows = [{'sample_id': item['sample_id'], 'reason': item['reason'],
+                 'retained_sample_id': item.get('retained_sample_id'),
+                 **{f'original:{name}': value for name, value in item['values'].items()}}
+                for item in audit['skipped']]
+        pd.DataFrame(rows).to_csv(target / 'spatial_skipped_records.csv', index=False, encoding='utf-8-sig')
     return target
