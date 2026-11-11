@@ -46,8 +46,56 @@ def preview_source(source, *, sheet_name=0, header=0):
             "header": header, "sheet_name": sheet_name}
 
 
-def import_source(preview, *, mapping):
+def _prepare_import_ids(preview, mapping):
     frame = preview["frame"].copy(deep=True)
+    policy = mapping.get("id_policy", "strict")
+    if policy not in {"strict", "skip"}:
+        raise DataValidationError("点号处理方式必须为严格检查或跳过空缺／重复点号")
+    if policy != "skip" or mapping.get("generated_ids", False):
+        return frame, None
+    column = mapping.get("sample_id")
+    if column not in frame:
+        raise DataValidationError("请选择有效的点号列")
+    ids = frame[column]
+    blank = ids.isna() | ids.astype(str).str.strip().eq("")
+    duplicate = ~blank & ids.duplicated(keep="first")
+    excluded = blank | duplicate
+    first_row = preview.get("header", 0) + 2
+    skipped = []
+    for position in np.flatnonzero(excluded.to_numpy()):
+        values = frame.iloc[position].astype(object)
+        values = values.where(pd.notna(values), None)
+        skipped.append({"source_row": int(first_row + position),
+                        "reason": "blank_id" if blank.iloc[position] else "duplicate_id",
+                        "values": values.to_dict()})
+    retained = frame.loc[~excluded].copy(deep=True)
+    if retained.empty:
+        raise DataValidationError("跳过空缺／重复点号后没有可导入记录；请检查点号列与表头行")
+    return retained, {"policy": "skip_blank_keep_first", "sample_id_column": column,
+                      "source": preview["source"], "sheet_name": preview.get("sheet_name"),
+                      "input_rows": len(frame), "retained_rows": len(retained),
+                      "blank_rows": int(blank.sum()), "duplicate_rows": int(duplicate.sum()),
+                      "skipped": skipped}
+
+
+def _export_import_audit(data, directory, report):
+    audits = [entry["parameters"] for entry in getattr(data, "history", [])
+              if entry["operation"] == "import_id_filter"]
+    audit = audits[-1] if audits else report.get("import_id_filter")
+    if audit is None:
+        return
+    write_json(directory / "import_id_audit.json", audit)
+    rows = [{"source_row": item["source_row"], "reason": item["reason"],
+             **{f"original:{name}": value for name, value in item["values"].items()}}
+            for item in audit["skipped"]]
+    table = pd.DataFrame(rows)
+    if table.empty:
+        table = pd.DataFrame(columns=["source_row", "reason"])
+    table.to_csv(directory / "skipped_records.csv", index=False, encoding="utf-8-sig")
+
+
+def import_source(preview, *, mapping):
+    frame, id_audit = _prepare_import_ids(preview, mapping)
     generated = mapping.get("generated_ids", False)
     split = mapping.get("split_point_line", False)
     if type(generated) is not bool or type(split) is not bool:
@@ -79,6 +127,8 @@ def import_source(preview, *, mapping):
     from .coordinate_check import check_coordinates
     coordinate_report = check_coordinates(frame[[schema.x, schema.y]].apply(pd.to_numeric, errors='coerce').to_numpy(), crs=schema.crs)
     data = MagneticAPI().read(frame, schema=schema)
+    if id_audit is not None:
+        data.history.append(record('import_id_filter', 'geo_toolbox', id_audit))
     data.history.append(record('coordinate_check', 'geo_toolbox', coordinate_report))
     data.history.append(record("gui_import", "geo_toolbox", {"source": preview["source"],
                         "source_sha256": preview.get("source_sha256"),
@@ -294,6 +344,7 @@ def export_result(data, *, directory, report):
         raise DataValidationError("输出父目录不存在")
     output = data.export(path)
     write_json(output / "gui_report.json", report)
+    _export_import_audit(data, output, report)
     return output
 
 

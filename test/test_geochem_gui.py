@@ -396,7 +396,7 @@ def test_report_branch_match(tmp_path, monkeypatch):
         workbench._do_export()
         assert _pump(root, workbench)
         assert sent[0][0] is workbench.features
-        context_keys = ("coordinate_check", "reference_overlay_check")
+        context_keys = ("coordinate_check", "reference_overlay_check", "import_id_filter")
         assert {k: v for k, v in sent[0][1].items()
                 if k not in context_keys} == features_report
         assert "coordinate_check" in sent[0][1]

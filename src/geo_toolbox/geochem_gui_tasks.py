@@ -11,11 +11,11 @@ from pyproj.exceptions import CRSError
 from .core import GeochemDataset, GeochemSchema, GridSpec, MapResult, record, write_json
 from .errors import DataValidationError, MissingBackendError
 from .geochem import GeochemistryAPI, _metric_crs, _require_concentrations, _usable
-from .gui_tasks import _integer, _real, describe_error, preview_source
+from .gui_tasks import _export_import_audit, _integer, _prepare_import_ids, _real, describe_error, preview_source
 
 
 def import_source(preview, *, mapping):
-    frame = preview["frame"].copy(deep=True)
+    frame, id_audit = _prepare_import_ids(preview, mapping)
     generated = mapping.get("generated_ids", False)
     if type(generated) is not bool:
         raise DataValidationError("生成审计ID必须明确选择")
@@ -52,6 +52,8 @@ def import_source(preview, *, mapping):
     from .coordinate_check import check_coordinates
     coordinate_report = check_coordinates(frame[[schema.x, schema.y]].apply(pd.to_numeric, errors='coerce').to_numpy(), crs=schema.crs)
     data = GeochemistryAPI().read(frame, schema=schema)
+    if id_audit is not None:
+        data.history.append(record('import_id_filter', 'geo_toolbox', id_audit))
     data.history.append(record('coordinate_check', 'geo_toolbox', coordinate_report))
     data.history.append(record("geochem_gui_import", "geo_toolbox", {
         "source": preview["source"], "source_sha256": preview.get("source_sha256"),
@@ -265,4 +267,5 @@ def export_result(data, *, directory, report):
     else:
         data.export(target)
     write_json(target / "gui_report.json", report)
+    _export_import_audit(data, target, report)
     return target

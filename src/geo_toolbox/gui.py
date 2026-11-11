@@ -357,8 +357,12 @@ class MagneticWorkbench:
             row=2, column=1, padx=6, sticky="w")
         ttk.Label(optional, text="例如 EPSG:21456。底图坐标系不一定就是测点坐标系；不自动交换 X/Y 或去除带号。",
                   wraplength=680).grid(row=3, column=0, columnspan=4, sticky="w", pady=6)
+        self.skip_ids_var = tk.BooleanVar(value=True)
+        self._input(ttk.Checkbutton(mapping, text="跳过空点号；重复点号只保留首次（记录跳过明细）",
+                                    variable=self.skip_ids_var, command=self._mapping_changed)).grid(
+            row=5, column=0, columnspan=4, sticky="w", padx=4)
         self.generated_var = tk.BooleanVar(value=False)
-        self._input(ttk.Checkbutton(optional, text="原点号有空缺／重复：用行号另建核对编号（保留原点号）", variable=self.generated_var,
+        self._input(ttk.Checkbutton(optional, text="改用行号编号（优先于跳过选项，保留所有行及原点号）", variable=self.generated_var,
                                     command=self._mapping_changed)).grid(row=4, column=0,
                                                                         columnspan=2, padx=4,
                                                                         sticky="w")
@@ -980,6 +984,7 @@ class MagneticWorkbench:
             "stage": raw_stage(self.stage_var.get()) or None,
             "crs": self.crs_var.get().strip() or None,
             "generated_ids": bool(self.generated_var.get()),
+            "id_policy": "skip" if self.skip_ids_var.get() else "strict",
             "split_point_line": bool(self.split_var.get()),
             "point_line": self.map_vars["point_line"].get() or None,
         }
@@ -1002,6 +1007,14 @@ class MagneticWorkbench:
                   f"原始单位={data.schema.unit}(统一nT) crs={data.schema.crs or '未知'}")
         self._do_check()
 
+    def _import_audit_summary(self):
+        for entry in reversed(getattr(self.dataset, "history", [])):
+            if entry["operation"] == "import_id_filter":
+                audit = entry["parameters"]
+                return (f"；导入跳过：空点号 {audit['blank_rows']} 行、后续重号 {audit['duplicate_rows']} 行"
+                        "（重号保留首次，另存时附明细）")
+        return ""
+
     def _show_dataset_info(self):
         data = self.dataset
         if data is None:
@@ -1010,7 +1023,7 @@ class MagneticWorkbench:
         from .gui_guidance import labeled
         self.dataset_label.configure(
             text=f"已保留 {len(data.values)} 行；{labeled(data.stage)}；"
-                 f"原单位 {data.schema.unit}（当前统一为 nT）；坐标系{'已声明（见坐标检查）' if data.schema.crs else '未知，先做非空间检查'}",
+                 f"原单位 {data.schema.unit}（当前统一为 nT）；坐标系{'已声明（见坐标检查）' if data.schema.crs else '未知，先做非空间检查'}" + self._import_audit_summary(),
             wraplength=790)
 
     def _do_check(self):
@@ -1176,6 +1189,10 @@ class MagneticWorkbench:
 
     def _report_with_coordinates(self, report):
         combined = dict(report or {})
+        for entry in reversed(getattr(self.dataset, "history", [])):
+            if entry["operation"] == "import_id_filter":
+                combined['import_id_filter'] = entry['parameters']
+                break
         if self.coordinate_report is not None:
             combined['coordinate_check'] = self.coordinate_report
         if getattr(self, 'overlay_report', None) is not None:

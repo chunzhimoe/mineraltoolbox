@@ -86,6 +86,10 @@ class GeochemWorkbench(MagneticWorkbench):
             combo.bind("<<ComboboxSelected>>", self._mapping_changed)
             self.map_vars[key] = var
             self.map_combos[key] = combo
+        self.skip_ids_var = tk.BooleanVar(value=True)
+        self._input(ttk.Checkbutton(mapping, text="跳过空点号；重复点号只保留首次（记录跳过明细）",
+                                    variable=self.skip_ids_var, command=self._mapping_changed)).grid(
+            row=1, column=0, columnspan=6, sticky="w", padx=4)
         optional = self._details_section(confirm, "补充坐标与零值说明（不知道可跳过）")
         ttk.Label(optional, text="测点坐标系（未知留空）").grid(row=0, column=0, sticky="e")
         self.crs_var = tk.StringVar()
@@ -93,7 +97,7 @@ class GeochemWorkbench(MagneticWorkbench):
         self._input(ttk.Entry(optional, textvariable=self.crs_var, width=22)).grid(
             row=0, column=1, padx=6, sticky="w")
         self.generated_var = tk.BooleanVar(value=False)
-        self._input(ttk.Checkbutton(optional, text="原点号空缺／重复：按行号另建核对编号", variable=self.generated_var,
+        self._input(ttk.Checkbutton(optional, text="改用行号编号（优先于跳过选项，保留所有行及原点号）", variable=self.generated_var,
                                     command=self._mapping_changed)).grid(row=1, column=0,
                                                                         columnspan=2,
                                                                         sticky="w")
@@ -572,6 +576,7 @@ class GeochemWorkbench(MagneticWorkbench):
             "y": self.map_vars["y"].get() or None,
             "crs": self.crs_var.get().strip() or None,
             "generated_ids": bool(self.generated_var.get()),
+            "id_policy": "skip" if self.skip_ids_var.get() else "strict",
             "elements": elements,
             "units": units,
             "detection_limits": limits,
@@ -649,7 +654,7 @@ class GeochemWorkbench(MagneticWorkbench):
         self.dataset_label.configure(
             text=f"保留 {len(data.values)} 行；元素 {','.join(data.schema.elements)}；"
                  f"缺失 {counts['missing']}、低于限值 {counts['censored']}、待复核 {counts['invalid']}；"
-                 f"坐标系{'已声明（见坐标检查）' if data.crs else '未知，先做非空间检查'}",
+                 f"坐标系{'已声明（见坐标检查）' if data.crs else '未知，先做非空间检查'}" + self._import_audit_summary(),
             wraplength=790)
 
     def _restore_original(self):

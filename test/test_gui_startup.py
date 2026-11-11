@@ -21,6 +21,7 @@ def test_constructor_has_no_callback_errors_and_mapping_still_invalidates(monkey
         assert app.grid_label.winfo_exists()
         assert app.log_text.winfo_exists()
         assert not app._populating
+        assert app.skip_ids_var.get()
         if isinstance(app, geochem_gui.GeochemWorkbench):
             assert app.zero_var.get() == "待复核（不能直接填补）"
         app.dataset = object()
