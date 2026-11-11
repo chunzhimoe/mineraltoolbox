@@ -31,7 +31,8 @@ class _Msg:
 
 
 def _root(cls):
-    root = tk.Tk()
+    from tk_test_support import create_tk_root
+    root = create_tk_root()
     root.withdraw()
     wb = cls(root)
     wb.messagebox = _Msg()

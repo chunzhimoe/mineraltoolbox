@@ -33,14 +33,8 @@ class _Msg:
 
 
 def _workbench():
-    root = None
-    for _ in range(5):
-        try:
-            root = tk.Tk()
-            break
-        except tk.TclError:
-            time.sleep(0.3)
-    assert root is not None
+    from tk_test_support import create_tk_root
+    root = create_tk_root()
     root.withdraw()
     workbench = MagneticWorkbench(root)
     workbench.messagebox = _Msg()
