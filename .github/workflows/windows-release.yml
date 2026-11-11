@@ -41,7 +41,6 @@ jobs:
         run: |
           python test/verify_frozen_bundle.py --output test/out/frozen-ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item test/out/frozen-ci/MineralToolbox-report.json dist/MineralToolbox/self-test.json
       - name: Retain frozen diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -56,17 +55,17 @@ jobs:
       - name: Archive binary, source, dependency inventory and checksums
         run: |
           New-Item -ItemType Directory release | Out-Null
-          python -m pip freeze | Set-Content dist/MineralToolbox/dependencies.txt -Encoding utf8
-          python .devin/build/collect_licenses.py dist/MineralToolbox/THIRD_PARTY_LICENSES
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Compress-Archive -Path dist/MineralToolbox -DestinationPath release/MineralToolbox-windows-x64.zip
+          Copy-Item dist/MineralToolbox.exe release/MineralToolbox-windows-x64.exe
           git archive --format=zip --prefix=MineralToolbox-source/ -o release/MineralToolbox-source.zip HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item dist/MineralToolbox/dependencies.txt release/dependencies.txt
+          python -m pip freeze | Set-Content release/dependencies.txt -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem release -File | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content release/SHA256SUMS.txt -Encoding ascii
+          python test/verify_license_archive.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: MineralToolbox-windows-x64
@@ -91,4 +90,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$RELEASE_TAG" release/* --verify-tag --title "MineralToolbox $RELEASE_TAG — Windows x64" --notes "Windows x64 portable application. Extract the entire ZIP and run MineralToolbox.exe; retain _internal. Includes magnetic and geochemical workbenches. No Python installation required. Unsigned binary: Windows may display SmartScreen warnings. Source and dependency inventory are attached. Independent scientific validation and confirmed CRS remain required for real data."
+          gh release create "$RELEASE_TAG" release/* --verify-tag --title "MineralToolbox $RELEASE_TAG for Windows x64" --notes "Single-file Windows x64 application: run MineralToolbox-windows-x64.exe directly, no installation or unpacking directory needed (first launch may take a moment while the embedded environment extracts). Includes magnetic and geochemical workbenches. Unsigned binary: Windows may display SmartScreen warnings. Source archive, dependency inventory and checksums are attached. Independent scientific validation and confirmed CRS remain required for real data."

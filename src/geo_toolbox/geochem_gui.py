@@ -98,12 +98,11 @@ class GeochemWorkbench(MagneticWorkbench):
                                                                         columnspan=2,
                                                                         sticky="w")
         ttk.Label(optional, text="零值含义").grid(row=2, column=0, sticky="e")
-        self.zero_var = tk.StringVar(value="invalid")
+        self.zero_var = tk.StringVar(value="待复核（不能直接填补）")
         self.zero_var.trace_add("write", self._mapping_changed)
         self.zero_combo = self._input(
             ttk.Combobox(optional, textvariable=self.zero_var, values=("待复核（不能直接填补）", "低于检出限（需明确限值）"),
                          width=30, state="readonly"))
-        self.zero_combo.set("待复核（不能直接填补）")
         self.zero_combo.grid(row=2, column=1, sticky="w")
         self.zero_combo.bind("<<ComboboxSelected>>", self._mapping_changed)
         ttk.Label(optional, foreground="#8a5a00", wraplength=600, justify="left",

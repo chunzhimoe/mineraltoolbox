@@ -17,14 +17,28 @@ def _workbench_checks():
     from .gui import MagneticWorkbench
 
     for workbench in (MagneticWorkbench, GeochemWorkbench):
+        errors = []
+
+        class CheckedWorkbench(workbench):
+            def _on_callback_error(self, kind, value, tb):
+                errors.append(''.join(traceback.format_exception(kind, value, tb)))
+
         root = tk.Tk()
         root.withdraw()
-        app = workbench(root)
-        canvas = FigureCanvasTkAgg(Figure(figsize=(2, 2)), master=root)
-        canvas.draw()
-        canvas.get_tk_widget().destroy()
-        root.update()
-        app._on_close()
+        app = None
+        try:
+            app = CheckedWorkbench(root)
+            canvas = FigureCanvasTkAgg(Figure(figsize=(2, 2)), master=root)
+            canvas.draw()
+            canvas.get_tk_widget().destroy()
+            root.update()
+            if errors:
+                raise RuntimeError('\n'.join(errors))
+        finally:
+            if app is not None:
+                app._on_close()
+            else:
+                root.destroy()
 
 
 def _science_checks(report):
@@ -70,6 +84,30 @@ def _science_checks(report):
     report['checks'].append('GeoTIFF/CRS')
 
 
+def _bundle_checks(result):
+    import sys
+    if not getattr(sys, 'frozen', False):
+        return
+    bundle = Path(sys._MEIPASS)
+    licenses = list((bundle / 'LICENSES').iterdir()) if (bundle / 'LICENSES').is_dir() else []
+    if not licenses:
+        raise RuntimeError('Embedded LICENSES directory missing or empty')
+    metadata_file = bundle / 'THIRD_PARTY_LICENSES' / 'affine' / 'METADATA.txt'
+    embedded = metadata_file.read_text(encoding='utf-8').replace('\r\n', '\n')
+    import importlib.metadata
+    installed = importlib.metadata.distribution('affine').read_text('METADATA').replace('\r\n', '\n')
+    if embedded != installed:
+        raise RuntimeError('Embedded affine metadata differs from the installed distribution')
+    license_files = [path for path in (bundle / 'THIRD_PARTY_LICENSES' / 'affine').rglob('*')
+                     if path.is_file() and any(word in path.name.lower() for word in ('license', 'copying', 'notice'))]
+    if not license_files:
+        raise RuntimeError('Embedded affine license file missing')
+    inventory = bundle / 'dependencies.txt'
+    if not inventory.is_file() or not inventory.read_text(encoding='utf-8').strip():
+        raise RuntimeError('Embedded dependency inventory missing or empty')
+    result['checks'].append('Embedded licenses/dependency inventory')
+
+
 def run(report):
     report.parent.mkdir(parents=True, exist_ok=True)
     result = {'status': 'started', 'stage': 'startup', 'checks': [], 'started_at': time.time()}
@@ -82,6 +120,9 @@ def run(report):
         result['stage'] = 'science algorithms'
         _write(report, result)
         _science_checks(result)
+        result['stage'] = 'embedded resources'
+        _write(report, result)
+        _bundle_checks(result)
     except BaseException:
         result['status'] = 'failed'
         result['error'] = traceback.format_exc()

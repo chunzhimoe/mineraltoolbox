@@ -65,7 +65,7 @@ class MagneticWorkbench:
         self._busy = False
         self._queue = queue.Queue()
         self._after = None
-        self._populating = False
+        self._populating = True
         self._saved_states = {}
         self._inputs = []
         self._poll_id = None
@@ -111,6 +111,7 @@ class MagneticWorkbench:
         self._translate_choices()
         self._transform_selected()
         self._interp_selected()
+        self._populating = False
         self._refresh_actions()
         self._poll_id = root.after(0, self._poll)
 
