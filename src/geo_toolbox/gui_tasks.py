@@ -76,7 +76,10 @@ def import_source(preview, *, mapping):
                             value=mapping.get("value"), crs=mapping.get("crs") or None,
                             unit=mapping.get("unit"), stage=mapping.get("stage"),
                             upward=mapping.get("upward") or None, line=line, sequence=sequence)
+    from .coordinate_check import check_coordinates
+    coordinate_report = check_coordinates(frame[[schema.x, schema.y]].apply(pd.to_numeric, errors='coerce').to_numpy(), crs=schema.crs)
     data = MagneticAPI().read(frame, schema=schema)
+    data.history.append(record('coordinate_check', 'geo_toolbox', coordinate_report))
     data.history.append(record("gui_import", "geo_toolbox", {"source": preview["source"],
                         "source_sha256": preview.get("source_sha256"),
                         "sheet_name": preview.get("sheet_name"), "header": preview.get("header"),
@@ -172,6 +175,10 @@ def preflight(data, *, operation, parameters):
                 raise DataValidationError("存在缺失/非法磁值，请先复核")
             warnings.append("筛查只标记候选，不确认噪声，不自动去除异常")
         elif operation == "interpolate":
+            from .coordinate_check import check_coordinates
+            coordinate_report = check_coordinates(data.coordinates[['easting', 'northing']].to_numpy(), crs=data.schema.crs)
+            if coordinate_report['status'] == 'review':
+                warnings.append('测点坐标声明与范围需要复核：' + '；'.join(coordinate_report['messages']))
             coordinates, _ = _usable(data)
             grid = GridSpec.from_bounds(p["bounds"], p["resolution"], data.schema.crs)
             if grid.width * grid.height > 1_000_000:

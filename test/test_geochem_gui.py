@@ -250,7 +250,7 @@ def test_import_has_no_errors_and_report(tmp_path):
         _imported(root, workbench, tmp_path)
         assert not any(call[0] == "error" for call in workbench.messagebox.calls)
         assert workbench.last_report
-        assert "observed" in workbench.report_text.get("1.0", "end")
+        assert "正常观测" in workbench.report_text.get("1.0", "end")
     finally:
         workbench._on_close()
 
@@ -402,7 +402,12 @@ def test_report_branch_match(tmp_path, monkeypatch):
         workbench._do_export()
         assert _pump(root, workbench)
         assert sent[0][0] is workbench.features
-        assert sent[0][1] is features_report
+        context_keys = ("coordinate_check", "reference_overlay_check")
+        assert {k: v for k, v in sent[0][1].items()
+                if k not in context_keys} == features_report
+        assert "coordinate_check" in sent[0][1]
+        assert "coordinate_check" not in features_report
+        assert workbench._reports["特征"] is features_report
         assert workbench._reports["原导入"] == {}
     finally:
         workbench._on_close()

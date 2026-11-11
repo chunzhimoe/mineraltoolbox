@@ -145,7 +145,7 @@ def test_combobox_events_preserve_preview_then_import(tmp_path):
         assert workbench.dataset is not None
         assert len(workbench.dataset.values) == 4
         assert workbench.last_report is not None
-        assert "observed" in workbench.report_text.get("1.0", "end")
+        assert "观测" in workbench.report_text.get("1.0", "end")
     finally:
         workbench._on_close()
 
@@ -216,7 +216,8 @@ def test_failed_reimport_retains_prior_result(tmp_path):
         workbench.unit_var.set("")
         workbench._do_import()
         assert _pump(root, workbench)
-        assert any(call[0] == "error" for call in workbench.messagebox.calls)
+        assert any(call[0] in ("error", "warning")
+                   for call in workbench.messagebox.calls)
         assert workbench.dataset is None
         assert workbench.last_result is None
     finally:

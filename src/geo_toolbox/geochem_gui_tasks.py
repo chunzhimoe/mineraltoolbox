@@ -49,7 +49,10 @@ def import_source(preview, *, mapping):
                            units=mapping.get("units", {}), detection_limits=limits,
                            detection_limit_columns=mapping.get("detection_limit_columns", {}),
                            zero_policy=mapping.get("zero_policy", "invalid"))
+    from .coordinate_check import check_coordinates
+    coordinate_report = check_coordinates(frame[[schema.x, schema.y]].apply(pd.to_numeric, errors='coerce').to_numpy(), crs=schema.crs)
     data = GeochemistryAPI().read(frame, schema=schema)
+    data.history.append(record('coordinate_check', 'geo_toolbox', coordinate_report))
     data.history.append(record("geochem_gui_import", "geo_toolbox", {
         "source": preview["source"], "source_sha256": preview.get("source_sha256"),
         "sheet_name": preview.get("sheet_name"), "header": preview.get("header"),
@@ -182,6 +185,10 @@ def preflight(data, *, operation, parameters):
                 raise DataValidationError("先解决全部缺失、删失及非法值，再执行对数比变换")
             warnings.append("CLR/ILR为无量纲特征，移除共同倍增富集；原浓度单独保留，不能把特征当浓度插值")
         else:
+            from .coordinate_check import check_coordinates
+            coordinate_report = check_coordinates(data.coordinates.to_numpy(), crs=data.crs)
+            if coordinate_report['status'] == 'review':
+                warnings.append('测点坐标声明与范围需要复核：' + '；'.join(coordinate_report['messages']))
             _spatial(data)
             if operation == "variogram":
                 if p["element"] not in data.schema.elements:

@@ -4,7 +4,7 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_dat
 root = Path(SPECPATH).resolve().parents[1]
 datas = [(str(root / 'LICENSES'), 'LICENSES')]
 binaries = []
-hiddenimports = ['matplotlib.backends.backend_tkagg', 'rasterio.sample', 'rasterio.vrt']
+hiddenimports = ['matplotlib.backends.backend_tkagg', 'rasterio.sample', 'rasterio.vrt', 'shapefile']
 for package in ('geo_toolbox', 'pyrolite', 'gstools', 'pykrige', 'ppigrf', 'xrft', 'openpyxl', 'xlrd', 'rasterio'):
     hiddenimports += collect_submodules(package, filter=lambda name: '.tests' not in name and '.test' not in name)
 for package in ('pyrolite', 'ppigrf', 'rasterio'):
@@ -14,7 +14,7 @@ for package in ('numba', 'llvmlite', 'choclo', 'harmonica', 'verde'):
     datas += data
     binaries += binary
     hiddenimports += modules
-for package in ('geo-toolbox', 'pyrolite', 'gstools', 'PyKrige', 'ppigrf', 'harmonica', 'verde', 'rasterio', 'pyproj', 'matplotlib'):
+for package in ('geo-toolbox', 'pyrolite', 'gstools', 'PyKrige', 'ppigrf', 'harmonica', 'verde', 'rasterio', 'pyproj', 'matplotlib', 'pyshp'):
     datas += copy_metadata(package, recursive=True)
 
 a = Analysis([str(root / '.devin/build/launcher.py')], pathex=[str(root / 'src')],

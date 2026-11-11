@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geo-toolbox"
-version = "0.1.0"
+version = "0.1.3"
 description = "Unified geochemical, magnetic and spatial preprocessing toolbox over mature upstream libraries"
 requires-python = ">=3.11"
 license-files = ["LICENSES/*"]
@@ -25,6 +25,7 @@ spatial = [
 ]
 excel = ["openpyxl>=3.1,<3.2", "xlrd>=2.0,<3"]
 mapgis = ["pyshp==3.1.6"]
+overlay = ["pyshp==3.1.6"]
 magnetic = ["harmonica==0.7.0", "verde==1.8.1", "ppigrf==2.1.0"]
 gui = ["matplotlib>=3.11,<3.12"]
 parquet = ["pyarrow>=26,<27"]

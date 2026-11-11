@@ -25,8 +25,7 @@ class GeochemWorkbench(MagneticWorkbench):
         self._results = {}
         super().__init__(root)
         root.title("GeoToolbox – 地球化学工作台")
-        self.notebook.tab(1, text="质控与处理")
-        self.notebook.tab(2, text="空间分析")
+        self.notebook.tab(self.tab_qc, text="3 检查与看图")
 
     def _task_api(self):
         from . import geochem_gui_tasks
@@ -66,7 +65,13 @@ class GeochemWorkbench(MagneticWorkbench):
         self._input(ttk.Entry(src, textvariable=self.header_var, width=6)).grid(row=1, column=3)
         src.columnconfigure(1, weight=1)
 
-        mapping = ttk.LabelFrame(frame, text="列映射与元素配置")
+        ttk.Label(frame, text="先看列名是否读对。第一行若是标题，请调整列名行再读取。",
+                  wraplength=740).pack(anchor="w", padx=8, pady=6)
+        confirm_outer, confirm = self._scroll_frame(self.tab_confirm, 760)
+        confirm_outer.pack(fill="both", expand=True)
+        ttk.Label(confirm, text="确认点号和坐标，再勾选要看的元素并填写各自单位。不会自动填补或删除原值。",
+                  wraplength=740).pack(anchor="w", padx=6, pady=8)
+        mapping = ttk.LabelFrame(confirm, text="确认点号与坐标")
         mapping.pack(fill="x", padx=6, pady=4)
         self.map_vars = {}
         self.map_combos = {}
@@ -81,33 +86,35 @@ class GeochemWorkbench(MagneticWorkbench):
             combo.bind("<<ComboboxSelected>>", self._mapping_changed)
             self.map_vars[key] = var
             self.map_combos[key] = combo
-        ttk.Label(mapping, text="CRS").grid(row=0, column=6, sticky="e")
+        optional = self._details_section(confirm, "补充坐标与零值说明（不知道可跳过）")
+        ttk.Label(optional, text="测点坐标系（未知留空）").grid(row=0, column=0, sticky="e")
         self.crs_var = tk.StringVar()
         self.crs_var.trace_add("write", self._mapping_changed)
-        self._input(ttk.Entry(mapping, textvariable=self.crs_var, width=12)).grid(
-            row=0, column=7, padx=2, sticky="w")
+        self._input(ttk.Entry(optional, textvariable=self.crs_var, width=22)).grid(
+            row=0, column=1, padx=6, sticky="w")
         self.generated_var = tk.BooleanVar(value=False)
-        self._input(ttk.Checkbutton(mapping, text="生成审计ID", variable=self.generated_var,
+        self._input(ttk.Checkbutton(optional, text="原点号空缺／重复：按行号另建核对编号", variable=self.generated_var,
                                     command=self._mapping_changed)).grid(row=1, column=0,
                                                                         columnspan=2,
                                                                         sticky="w")
-        ttk.Label(mapping, text="零值策略").grid(row=1, column=2, sticky="e")
+        ttk.Label(optional, text="零值含义").grid(row=2, column=0, sticky="e")
         self.zero_var = tk.StringVar(value="invalid")
         self.zero_var.trace_add("write", self._mapping_changed)
         self.zero_combo = self._input(
-            ttk.Combobox(mapping, textvariable=self.zero_var, values=_ZERO_POLICIES,
-                         width=9, state="readonly"))
-        self.zero_combo.grid(row=1, column=3, sticky="w")
+            ttk.Combobox(optional, textvariable=self.zero_var, values=("待复核（不能直接填补）", "低于检出限（需明确限值）"),
+                         width=30, state="readonly"))
+        self.zero_combo.set("待复核（不能直接填补）")
+        self.zero_combo.grid(row=2, column=1, sticky="w")
         self.zero_combo.bind("<<ComboboxSelected>>", self._mapping_changed)
-        ttk.Label(mapping, foreground="#8a5a00", wraplength=380, justify="left",
-                  text="零默认非法；仅明确限值时才能按删失处理").grid(
-            row=1, column=4, columnspan=4, sticky="w")
+        ttk.Label(optional, foreground="#8a5a00", wraplength=600, justify="left",
+                  text="坐标系不知道可留空。零值先保留为待复核，只有报告明确检出限时才能按低于限值处理。").grid(
+            row=3, column=0, columnspan=4, sticky="w")
 
-        element_outer, self.element_frame = self._scroll_frame(frame, 700)
-        element_outer.pack(fill="x", padx=6, pady=4)
+        self.element_frame = ttk.LabelFrame(confirm, text="勾选要查看的元素，并确认单位")
+        self.element_frame.pack(fill="x", padx=6, pady=4)
 
         self.import_btn = self._input(
-            ttk.Button(frame, text="导入并执行质控检查", command=self._do_import))
+            ttk.Button(confirm, text="确认这些列，开始检查", command=self._do_import))
         self.import_btn.pack(anchor="w", padx=6, pady=4)
 
         table = ttk.Frame(frame)
@@ -131,9 +138,8 @@ class GeochemWorkbench(MagneticWorkbench):
                                        justify="left")
         self.dataset_label.pack(side="left")
 
-        controls = ttk.Frame(frame, height=220)
+        controls = ttk.Frame(frame)
         controls.pack(fill="x", padx=6, pady=2)
-        controls.pack_propagate(False)
         basic = ttk.Frame(controls)
         basic.pack(fill="x", pady=2)
         self.check_btn = self._input(ttk.Button(basic, text="质控检查",
@@ -148,9 +154,17 @@ class GeochemWorkbench(MagneticWorkbench):
         self.reset_btn = self._input(ttk.Button(basic, text="恢复原导入",
                                                 command=self._restore_original))
         self.reset_btn.pack(side="left", padx=8)
+        self._input(ttk.Button(basic, text="检查摘要",
+                               command=lambda: self._show_readable_report(self.last_report or {}))).pack(side="left", padx=4)
+        self._input(ttk.Button(basic, text="详细记录",
+                               command=self._show_detailed_report)).pack(
+            side="left", padx=4)
+        self._input(ttk.Button(basic, text="导入SHP底图核对",
+                               command=self._choose_reference_overlay)).pack(
+            side="left", padx=4)
 
-        impute = ttk.LabelFrame(controls, text="删失/缺失填补（Python文献版，不回退R语义）")
-        impute.pack(fill="x", pady=2)
+        self._input(ttk.Button(basic, text="后续处理（可跳过）", command=self._open_processing)).pack(side="left", padx=4)
+        impute = self._details_section(controls, "需要时再处理低于检出限／缺失值（不会自动执行）")
         ttk.Label(impute, text="方法*").grid(row=0, column=0, sticky="e")
         self.impute_method = self._input(
             ttk.Combobox(impute, values=_IMPUTE_METHODS, width=10, state="readonly"))
@@ -179,8 +193,7 @@ class GeochemWorkbench(MagneticWorkbench):
                   text="填补拟合整个批次，不作独立留出验证输入；失败不回退").grid(
             row=1, column=5, columnspan=3, sticky="w")
 
-        transform = ttk.LabelFrame(controls, text="对数比变换")
-        transform.pack(fill="x", pady=2)
+        transform = self._details_section(controls, "需要元素组合特征时再打开（保留原浓度）")
         ttk.Label(transform, text="方法*").grid(row=0, column=0, sticky="e")
         self.logratio_method = self._input(
             ttk.Combobox(transform, values=_LOGRATIO_METHODS, width=8, state="readonly"))
@@ -210,7 +223,7 @@ class GeochemWorkbench(MagneticWorkbench):
         features_vbar.pack(side="right", fill="y")
         features_hbar.pack(side="bottom", fill="x")
         self.features_tree.pack(fill="x")
-        self.report_text = tk.Text(left, wrap="none", width=40)
+        self.report_text = tk.Text(left, wrap="word", width=40)
         report_bar = ttk.Scrollbar(left, orient="vertical", command=self.report_text.yview)
         self.report_text.configure(yscrollcommand=report_bar.set)
         report_bar.pack(side="right", fill="y")
@@ -230,7 +243,18 @@ class GeochemWorkbench(MagneticWorkbench):
         pane.add(left_outer, weight=0)
         pane.add(right, weight=1)
 
-        variogram = ttk.LabelFrame(left, text="变异函数（当前浓度）")
+        taskbar = ttk.Frame(left)
+        taskbar.pack(fill="x", pady=2)
+        ttk.Label(taskbar, text="任务：").pack(side="left")
+        self.spatial_task = ttk.Combobox(
+            taskbar, width=22, state="readonly",
+            values=("检查空间相关性（变异函数）", "生成元素分布网格",
+                    "验证预测误差（留出验证）"))
+        self.spatial_task.set("检查空间相关性（变异函数）")
+        self.spatial_task.pack(side="left", padx=4)
+        self.spatial_task.bind("<<ComboboxSelected>>", self._spatial_task_changed)
+
+        variogram = self._variogram_frame = ttk.LabelFrame(left, text="变异函数（当前浓度）")
         variogram.pack(fill="x", pady=4)
         self.variogram_vars = {}
         ttk.Label(variogram, text="元素*").grid(row=0, column=0, sticky="e")
@@ -255,7 +279,8 @@ class GeochemWorkbench(MagneticWorkbench):
         ttk.Label(variogram, text="估计/边界共用于插值和验证；填边界时分箱数留空",
                   wraplength=240).grid(row=2, column=2, columnspan=2, sticky="w")
 
-        interp = ttk.LabelFrame(left, text="克里金插值（当前浓度，支持栅格必需）")
+        interp = self._interp_frame = ttk.LabelFrame(
+            left, text="克里金插值（当前浓度，支持栅格必需）")
         interp.pack(fill="x", pady=4)
         self.interp_vars = {}
         for i, (name, label) in enumerate((("xmin", "x最小"), ("ymin", "y最小"),
@@ -296,7 +321,7 @@ class GeochemWorkbench(MagneticWorkbench):
                                                command=self._do_interpolate))
         self.interp_btn.grid(row=6, column=2, columnspan=2, padx=4)
 
-        validate = ttk.LabelFrame(left, text="空间留出验证")
+        validate = self._validate_frame = ttk.LabelFrame(left, text="空间留出验证")
         validate.pack(fill="x", pady=4)
         ttk.Label(validate, text="数据分支*").grid(row=0, column=0, sticky="e")
         self.validate_source = self._input(
@@ -351,6 +376,16 @@ class GeochemWorkbench(MagneticWorkbench):
         self.grid_holder = ttk.Frame(right)
         self.grid_holder.pack(fill="both", expand=True)
         self.variogram_report = None
+        self._spatial_task_changed()
+
+    def _spatial_task_changed(self, event=None):
+        task = self.spatial_task.get()
+        visibility = {"检查空间相关性（变异函数）": self._variogram_frame,
+                      "生成元素分布网格": self._interp_frame,
+                      "验证预测误差（留出验证）": self._validate_frame}
+        for frame in (self._variogram_frame, self._interp_frame, self._validate_frame):
+            frame.pack_forget()
+        visibility.get(task, self._variogram_frame).pack(fill="x", pady=4)
 
     def _browse_support(self):
         name = self.filedialog.askopenfilename(
@@ -411,10 +446,16 @@ class GeochemWorkbench(MagneticWorkbench):
                 if var.get() not in columns:
                     var.set("")
                 self.map_combos[key].configure(values=list(columns))
+            from .gui_guidance import suggest_columns
+            for role, column in suggest_columns(columns, self.map_vars).items():
+                if not self.map_vars[role].get():
+                    self.map_vars[role].set(column)
             self._build_element_rows(columns)
         finally:
             self._populating = False
         self._refresh_actions()
+        self._coordinate_columns()
+        self._update_step_label()
         self._log(f"预览完成: {preview['source']} 列={len(columns)} "
                   f"全量行数={len(preview['frame'])}")
 
@@ -492,6 +533,19 @@ class GeochemWorkbench(MagneticWorkbench):
         if self.preview is None:
             return
         preview = self.preview
+        from .gui_guidance import require_fields
+        missing = require_fields(
+            {"sample_id": self.map_vars["sample_id"].get(), "x": self.map_vars["x"].get(),
+             "y": self.map_vars["y"].get()},
+            [("sample_id", "点号列"), ("x", "X列"), ("y", "Y列")])
+        if missing:
+            self.messagebox.showwarning("缺少信息", missing)
+            self._log(f"导入未提交: {missing}")
+            return
+        if not any(row["use"].get() for row in self.element_rows.values()):
+            self.messagebox.showwarning("缺少信息", "请至少勾选一个元素列并填写单位")
+            self._log("导入未提交: 未选择元素")
+            return
         elements, units, limits, limit_columns, modes = [], {}, {}, {}, {}
         for column, row in self.element_rows.items():
             if not row["use"].get():
@@ -524,7 +578,8 @@ class GeochemWorkbench(MagneticWorkbench):
             "detection_limits": limits,
             "detection_limit_columns": limit_columns,
             "detection_modes": modes,
-            "zero_policy": self.zero_var.get() or "invalid",
+            "zero_policy": {"待复核（不能直接填补）": "invalid", "低于检出限（需明确限值）": "censored"}.get(
+                self.zero_var.get(), self.zero_var.get() or "invalid"),
         }
         if self._submit("导入…",
                         lambda: self._task_api().import_source(preview, mapping=mapping),
@@ -535,6 +590,10 @@ class GeochemWorkbench(MagneticWorkbench):
         self._invalidate()
         self.original_dataset = data.copy()
         self.dataset = data
+        for entry in reversed(data.history):
+            if entry['operation'] == 'coordinate_check':
+                self._coordinates_checked(entry['parameters'], False)
+                break
         self.last_result = data
         self.last_report = {}
         self._results = {"原导入": self.original_dataset, "当前浓度": data}
@@ -579,6 +638,7 @@ class GeochemWorkbench(MagneticWorkbench):
             self.export_kind.set("最新结果")
         self.reset_btn.configure(
             state="normal" if self.original_dataset is not None else "disabled")
+        self._refresh_navigation()
 
     def _show_dataset_info(self):
         data = self.dataset
@@ -588,9 +648,10 @@ class GeochemWorkbench(MagneticWorkbench):
         counts = {name: int((data.status == name).to_numpy().sum())
                   for name in ("observed", "missing", "censored", "invalid")}
         self.dataset_label.configure(
-            text=f"样点 {len(data.values)} 行 | 元素={','.join(data.schema.elements)} | "
-                 f"CRS={data.crs or '未知'} | status={counts} | "
-                 f"已填补={int(data.imputed.to_numpy().any())}")
+            text=f"保留 {len(data.values)} 行；元素 {','.join(data.schema.elements)}；"
+                 f"缺失 {counts['missing']}、低于限值 {counts['censored']}、待复核 {counts['invalid']}；"
+                 f"坐标系{'已声明（见坐标检查）' if data.crs else '未知，先做非空间检查'}",
+            wraplength=790)
 
     def _restore_original(self):
         if self.original_dataset is None:
@@ -623,6 +684,11 @@ class GeochemWorkbench(MagneticWorkbench):
 
     def _qc_done(self, result):
         self._operation_done(result)
+
+    def _show_readable_report(self, report):
+        from .gui_guidance import geochem_summary
+        self.report_text.delete("1.0", "end")
+        self.report_text.insert("end", geochem_summary(self.dataset, report))
 
     def _operation_done(self, result, operation=None):
         kind = result["kind"]
@@ -672,11 +738,19 @@ class GeochemWorkbench(MagneticWorkbench):
                 self._draw_grid()
             self._results["最新报告"] = data
             self._reports["最新报告"] = result["report"]
-        self.report_text.delete("1.0", "end")
-        self.report_text.insert("end", json.dumps(result["report"], ensure_ascii=False,
-                                                  indent=2, default=str))
+        if kind == 'concentration':
+            self._show_readable_report(result['report'])
+        else:
+            descriptions = {'features': f'已生成组合特征 {data.values.shape[0]} 行 × {data.values.shape[1]} 列。' if kind == 'features' else '',
+                            'maps': f'已生成 {len(data.predictions)} 个元素的 {data.grid.width} × {data.grid.height} 网格。' if kind == 'maps' else '',
+                            'report': '已完成空间检查／预测验证。指标及参数请查看详细记录；不会替换当前浓度。'}
+            self.report_text.delete('1.0', 'end')
+            self.report_text.insert('end', descriptions.get(kind, descriptions['report']) + '\n原浓度和原文件保持不变；保存页可选择此次结果或原导入数据。')
         self._refresh_actions()
         self._update_export_info()
+        self._update_step_label()
+        if kind == 'concentration':
+            self.notebook.select(self.tab_qc)
         self._log(f"任务完成 kind={kind}")
 
     def _show_features(self, data):
@@ -716,6 +790,7 @@ class GeochemWorkbench(MagneticWorkbench):
             mask = np.isfinite(xy).all(axis=1) & np.isfinite(values)
             image = axis.scatter(xy[mask, 0], xy[mask, 1], s=8, c=values[mask])
             figure.colorbar(image, ax=axis, label="ppm")
+            self._draw_reference_overlay(axis)
             axis.set_title(f"{element} (finite shown); CRS={data.crs or 'unknown'}")
         canvas = FigureCanvasTkAgg(figure, master=self.scatter_holder)
         canvas.draw()
@@ -770,7 +845,8 @@ class GeochemWorkbench(MagneticWorkbench):
     def _do_impute(self):
         if self.dataset is None:
             return
-        parameters = {"method": self.impute_method.get(),
+        from .gui_guidance import raw_impute
+        parameters = {"method": raw_impute(self.impute_method.get()),
                       "frac": self.impute_vars["frac"].get(),
                       "tolerance": self.impute_vars["tolerance"].get(),
                       "max_iter": self.impute_vars["max_iter"].get(),
@@ -780,14 +856,16 @@ class GeochemWorkbench(MagneticWorkbench):
 
     def _do_transform(self):
         if self.dataset is not None:
-            parameters = {"method": self.logratio_method.get()}
+            from .gui_guidance import raw_logratio
+            parameters = {"method": raw_logratio(self.logratio_method.get())}
             self._run_operation("transform", parameters, self.dataset, self._operation_done)
 
     def _do_variogram(self):
         if self.dataset is None:
             return
+        from .gui_guidance import raw_model
         parameters = {"element": self.variogram_element.get(),
-                      "model": self.variogram_model.get(),
+                      "model": raw_model(self.variogram_model.get()),
                       "estimator": self.variogram_estimator.get(),
                       "bin_edges": self.bin_edges_var.get()}
         self._run_operation("variogram", parameters, self.dataset,
@@ -796,13 +874,14 @@ class GeochemWorkbench(MagneticWorkbench):
     def _do_interpolate(self):
         if self.dataset is None:
             return
+        from .gui_guidance import raw_model
         parameters = {"xmin": self.interp_vars["xmin"].get(),
                       "ymin": self.interp_vars["ymin"].get(),
                       "xmax": self.interp_vars["xmax"].get(),
                       "ymax": self.interp_vars["ymax"].get(),
                       "resolution": self.interp_vars["resolution"].get(),
                       "support_path": self.support_var.get(),
-                      "variogram": self.kriging_variogram.get(),
+                      "variogram": raw_model(self.kriging_variogram.get()),
                       "nlags": self.nlags_var.get(),
                       "bin_edges": self.bin_edges_var.get(),
                       "estimator": self.variogram_estimator.get() or "matheron",
@@ -821,7 +900,8 @@ class GeochemWorkbench(MagneticWorkbench):
         if data is None:
             self.messagebox.showwarning("验证", "所选分支不存在")
             return
-        parameters = {"variogram": self.validate_variogram.get(),
+        from .gui_guidance import raw_model
+        parameters = {"variogram": raw_model(self.validate_variogram.get()),
                       "nlags": self.validate_nlags.get(),
                       "bin_edges": self.bin_edges_var.get(),
                       "estimator": self.variogram_estimator.get() or "matheron",
@@ -859,7 +939,7 @@ class GeochemWorkbench(MagneticWorkbench):
             return
         self._submit("导出…",
                      lambda: self._task_api().export_result(
-                         data, directory=target, report=report or {}),
+                         data, directory=target, report=self._report_with_coordinates(report)),
                      self._export_done)
 
     def _build_log(self):
@@ -870,9 +950,9 @@ class GeochemWorkbench(MagneticWorkbench):
         self.log_text.configure(yscrollcommand=log_bar.set)
         self.log_text.pack(fill="both", expand=True, padx=6, pady=4)
         log_bar.pack(side="right", fill="y")
-        actions = ttk.Frame(frame)
-        actions.pack(fill="x", padx=6, pady=4)
-        ttk.Label(actions, text="导出对象").grid(row=0, column=0, sticky="e")
+        actions = ttk.LabelFrame(frame, text="另存检查结果／所选数据（原文件不动）")
+        actions.pack(fill="x", padx=6, pady=8, before=self.log_text)
+        ttk.Label(actions, text="保存哪份数据").grid(row=0, column=0, sticky="e")
         self.export_kind = self._input(
             ttk.Combobox(actions, values=("最新结果", "原导入", "当前浓度", "特征", "网格",
                                           "最新报告"),
